@@ -1,0 +1,143 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using BibliotecaProbador.Services
+@inject ProbadorService Probador
+
+<PageTitle>Probador de API</PageTitle>
+
+<div class="caja">
+    <p class="etiqueta">PRUEBA AUTOMÁTICA · BIBLIOTECA</p>
+    <h1>Probador de API</h1>
+    <p class="sub">Comprueba el contrato, observa el progreso y obtén la calificación al instante.</p>
+
+    <h2>API del estudiante</h2>
+
+    <label>Nombre del estudiante</label>
+    <input @bind="nombre" placeholder="Luilton Pichardo" disabled="@probando" />
+
+    <label>Controlador *</label>
+    <select @bind="controlador" disabled="@probando">
+        @foreach (var c in ProbadorService.Controladores)
+        {
+            <option value="@c">@c</option>
+        }
+    </select>
+
+    <label>URL base *</label>
+    <input @bind="urlBase" placeholder="https://localhost:7000" disabled="@probando" />
+
+    <button @onclick="Probar" disabled="@probando">@(probando ? "Probando..." : "Probar →")</button>
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <p class="error">@error</p>
+    }
+
+    @if (resultados.Count > 0 || probando)
+    {
+        <div class="barra"><div class="relleno" style="width:@(progreso)%"></div></div>
+
+        <ul class="lista">
+            @foreach (var r in resultados)
+            {
+                <li class="@(r.Paso ? "ok" : "mal")">
+                    <span class="icono">@(r.Paso ? "✓" : "✗")</span>
+                    <div>
+                        <strong>@r.Nombre</strong>
+                        <small>@r.Detalle</small>
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+
+    @if (terminado)
+    {
+        <div class="nota @(nota >= 70 ? "aprobado" : "reprobado")">
+            <span>@(string.IsNullOrWhiteSpace(nombre) ? "Estudiante" : nombre) · @controlador</span>
+            <strong>@nota / 100</strong>
+            <small>@pasaron de @puntuables pruebas superadas</small>
+        </div>
+    }
+</div>
+
+<style>
+    body { background: #f4f6fb; font-family: system-ui, "Segoe UI", sans-serif; margin: 0; color: #1f2937; }
+    .caja { max-width: 640px; margin: 40px auto; background: #fff; padding: 32px; border-radius: 16px;
+            box-shadow: 0 4px 24px rgba(0,0,0,.08); }
+    .etiqueta { font-size: 12px; letter-spacing: .12em; color: #6366f1; font-weight: 600; margin: 0; }
+    h1 { margin: 4px 0; }
+    .sub { color: #6b7280; margin-top: 0; }
+    h2 { font-size: 18px; margin: 24px 0 8px; }
+    label { display: block; font-size: 14px; font-weight: 600; margin: 14px 0 4px; }
+    input, select { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px;
+                    font-size: 15px; box-sizing: border-box; }
+    button { margin-top: 20px; width: 100%; padding: 12px; background: #6366f1; color: #fff; border: 0;
+             border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
+    button:disabled { background: #a5b4fc; cursor: wait; }
+    .error { color: #b91c1c; background: #fee2e2; padding: 10px 12px; border-radius: 8px; }
+    .barra { height: 10px; background: #e5e7eb; border-radius: 99px; margin-top: 24px; overflow: hidden; }
+    .relleno { height: 100%; background: #6366f1; transition: width .3s; }
+    .lista { list-style: none; padding: 0; margin: 16px 0 0; }
+    .lista li { display: flex; gap: 12px; padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; }
+    .lista li.ok { background: #ecfdf5; }
+    .lista li.mal { background: #fef2f2; }
+    .lista small { display: block; color: #6b7280; }
+    .icono { font-weight: 700; }
+    .ok .icono { color: #059669; }
+    .mal .icono { color: #dc2626; }
+    .nota { margin-top: 20px; padding: 20px; border-radius: 12px; text-align: center; }
+    .nota strong { display: block; font-size: 44px; }
+    .aprobado { background: #d1fae5; color: #065f46; }
+    .reprobado { background: #fee2e2; color: #991b1b; }
+</style>
+
+@code {
+    string nombre = "";
+    string controlador = "Estudiantes";
+    string urlBase = "";
+    string? error;
+    bool probando, terminado;
+    int progreso, nota, pasaron, puntuables;
+    readonly List<Resultado> resultados = new();
+
+    async Task Probar()
+    {
+        error = null;
+        terminado = false;
+        progreso = 0;
+        resultados.Clear();
+
+        if (!Uri.TryCreate(urlBase.Trim(), UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            error = "Escribe una URL base válida, por ejemplo https://localhost:7000";
+            return;
+        }
+
+        probando = true;
+        try
+        {
+            await Probador.ProbarAsync(controlador, urlBase.Trim(), async (r, hechos, total) =>
+            {
+                resultados.Add(r);
+                progreso = hechos * 100 / total;
+                await InvokeAsync(StateHasChanged);
+            });
+
+            var puntua = resultados.Where(x => x.Puntua).ToList();
+            puntuables = puntua.Count;
+            pasaron = puntua.Count(x => x.Paso);
+            nota = puntuables == 0 ? 0 : (int)Math.Round(pasaron * 100.0 / puntuables);
+            terminado = true;
+        }
+        catch (Exception ex)
+        {
+            error = "Ocurrió un error inesperado: " + ex.Message;
+        }
+        finally
+        {
+            probando = false;
+        }
+    }
+}
